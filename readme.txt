@@ -16,6 +16,12 @@ Old compressions used by old PKZip 1.x are not supported
 
 manual.tjs 参照
 
+●注意点
+
+2017/10/11の時点の最新のzlib ( https://github.com/madler/zlib ) で
+Release構成でビルドをするとハングするバイナリが出来ます。替わりに
+ReleaseWithoutAsm構成でビルドをしてください。
+
 ●ライセンス
 
 zlib 付属の contrib/minizip をプラグイン化したものです

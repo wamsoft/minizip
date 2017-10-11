@@ -370,20 +370,37 @@ public:
 	/**
 	 * ZIPファイルを開く
 	 * @param filename ファイル名
+	 * @param force_utf8 UTF8強制指定 0: SJIS/UTF8自動判定 1:強制
 	 */
-	void open(const tjs_char *filename) {
-		if ((uf = unzOpen2_64((const void*)filename, &TVPZlibFileFunc)) == NULL) {
-			ttstr msg = filename;
-			msg += L" can't open.";
-			TVPThrowExceptionMessage(msg.c_str());
-		}
-		// UTF8なファイル名かどうかの判定。最初のファイルで決める
-		unzGoToFirstFile(uf);
-		unz_file_info file_info;
-		if (unzGetCurrentFileInfo(uf,&file_info, NULL,0,NULL,0,NULL,0) == UNZ_OK) {
-			utf8 = (file_info.flag & FLAG_UTF8) != 0;
-		}
-	}
+    static tjs_error TJS_INTF_METHOD open(tTJSVariant *result,
+                                          tjs_int numparams,
+                                          tTJSVariant **param,
+                                          Unzip *self) {
+      if (numparams < 1) return TJS_E_BADPARAMCOUNT;
+      
+      ttstr filename = *param[0];
+      if ((self->uf = unzOpen2_64((const void*)filename.c_str(), &TVPZlibFileFunc)) == NULL) {
+        ttstr msg = filename;
+        msg += L" can't open.";
+        TVPThrowExceptionMessage(msg.c_str());
+      }
+      
+      // UTF8なファイル名かどうかの判定。
+      if (numparams > 1
+          && (int)*param[1]) {
+        // 第二引数がtrueならutf8強制
+        self->utf8 = true;
+      } else  {
+        // 最初のファイルで決める
+        unzGoToFirstFile(self->uf);
+        unz_file_info file_info;
+        if (unzGetCurrentFileInfo(self->uf,&file_info, NULL,0,NULL,0,NULL,0) == UNZ_OK) {
+          self->utf8 = (file_info.flag & FLAG_UTF8) != 0;
+        }
+      }
+
+      return TJS_S_OK;
+    }
 
 	/**
 	 * ZIP ファイルを閉じる
@@ -533,7 +550,7 @@ NCB_REGISTER_CLASS(Zip) {
 
 NCB_REGISTER_CLASS(Unzip) {
 	Constructor();
-	NCB_METHOD(open);
+	RawCallback("open", &ClassT::open, 0);
 	NCB_METHOD(close);
 	RawCallback("list", &ClassT::list, 0);
 	RawCallback("extract", &ClassT::extract, 0);

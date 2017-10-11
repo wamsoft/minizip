@@ -52,10 +52,10 @@ class Unzip {
 	/**
 	 * ZIPアーカイブを展開用にオープンします
 	 * @param filename ファイル名
-	 * @param overwrite 0:存在してたらエラー 1:上書き 2:追記
+	 * @param force_utf8 0:ファイル名の文字コードは最初のファイルで自動判別 1:UTF8強制
 	 * @throw Exception ファイルのオープンに失敗した場合
 	 */
-	function open(filename, overwrite=0);
+	function open(filename, force_utf8=0);
 
 	/**
 	 * ZIPアーカイブ中に含まれるファイルの情報を取得します
