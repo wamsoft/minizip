@@ -24,6 +24,7 @@ static const char *copyright =
 #include <io.h>
 
 #include "ncbind/ncbind.hpp"
+#include "zconf.h"
 #include "crypt.h"
 #include "unzip.h"
 #include "zip.h"

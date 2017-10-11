@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "zconf.h"
 #include "crypt.h"
 #include "unzip.h"
 #include "zip.h"
