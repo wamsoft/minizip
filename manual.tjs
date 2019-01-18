@@ -7,6 +7,12 @@
  */
 class Zip {
 
+        // 圧縮メソッド定義
+        CompressionMethodStore   = 0; // 圧縮しない
+        CompressionMethodDeflate = 1; // DEFLATE圧縮を行う（デフォルト）
+        CompressionMethodBzip2   = 2; // BZIP2圧縮を行う
+        CompressionMethodLzma    = 3; // LZMA圧縮を行う
+  
 	/**
 	 * コンストラクタ
 	 */
@@ -27,11 +33,12 @@ class Zip {
 	 * @param destfile アーカイブ中での名前(アーカイブ内パス名）
 	 * @param deflateLevel 圧縮レベル 0(無圧縮) ～ 9(最大圧縮) 省略時は 6になる
 	 * @param password 暗号化パスワード指定
+         * @param compressionMethod 圧縮メソッド
 	 * @return 追加に成功したら true
 	 * @throw Exception ZIPファイルが開かれてない場合
 	 * @throw Exception 追加するファイルが存在しない場合
 	 */
-	function add(srcfile, destfile, commpressLevel=void, password=void);
+        function add(srcfile, destfile, commpressLevel=void, password=void, compressionMethod = Zip.CompressionMethodDeflate);
 
 	/**
 	 * ZIPアーカイブをクローズします
