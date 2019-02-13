@@ -7,9 +7,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "crypt.h"
-#include "unzip.h"
-#include "zip.h"
+#include "mz_compat.h"
+#include "mz_strm.h"
+#include "zlib.h"
 
 #include "narrow.h"
 
@@ -22,7 +22,7 @@
 extern void storeFilename(ttstr &name, const char *narrowName, bool utf8);
 
 // ファイルアクセス用
-extern zlib_filefunc64_def TVPZlibFileFunc;
+extern  zlib_filefunc_def KrkrFileFuncDef;
 
 /**
  * Zip 展開処理クラス
@@ -52,7 +52,7 @@ public:
 	 */
 	bool init(const ttstr &filename) {
 		done();
-		if ((uf = unzOpen2_64((const void*)filename.c_str(), &TVPZlibFileFunc)) != NULL) {
+		if ((uf = unzOpen2_64((const void*)filename.c_str(), &KrkrFileFuncDef)) != NULL) {
 			lock();
 			unzGoToFirstFile(uf);
 			unz_file_info file_info;
@@ -128,7 +128,7 @@ public:
 		ZPOS64_T ret = 0;
 		if (uf) {
 			lock();
-			ret = unztell64(uf);
+			ret = unzTell64(uf);
 			unlock();
 		}
 		return ret;

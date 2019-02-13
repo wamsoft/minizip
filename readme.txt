@@ -16,10 +16,15 @@ Old compressions used by old PKZip 1.x are not supported
 
 manual.tjs 参照
 
+●注意点
+
+ビルドにはWindows用のcmakeが必要です。
+https://cmake.org/ から最新の安定版をダウンロードし、
+パスが通っている箇所にインストールしておいて下さい。
+
 ●ライセンス
 
-zlib 付属の contrib/minizip をプラグイン化したものです
+zlib 付属の contrib/minizip からfork した nmoinvaz/minizip
+(https://github.com/nmoinvaz/minizip) をプラグイン化したものです
 zlib ライセンスになります。
 
-Version 1.01e, February 12th, 2005
-Copyright (C) 1998-2005 Gilles Vollant

@@ -24,10 +24,10 @@ static const char *copyright =
 #include <io.h>
 
 #include "ncbind/ncbind.hpp"
-#include "crypt.h"
-#include "unzip.h"
-#include "zip.h"
-
+#include "mz_compat.h"
+#include "mz_strm.h"
+#include "zlib.h"
+  
 #include "narrow.h"
 
 #define BUFFERSIZE (16384)
@@ -38,7 +38,7 @@ static const char *copyright =
 #define FLAG_UTF8 (1<<11)
 
 // ファイルアクセス用
-extern zlib_filefunc64_def TVPZlibFileFunc;
+extern  zlib_filefunc_def KrkrFileFuncDef;
 
 // Date クラスメンバ
 static iTJSDispatch2 *dateClass = NULL;    // Date のクラスオブジェクト
@@ -197,7 +197,7 @@ public:
 			}
 		}
 
-		if ((self->zf = zipOpen2_64((const void*)filename.c_str(), (overwrite==2) ? 2 : 0, NULL, &TVPZlibFileFunc)) == NULL) {
+		if ((self->zf = zipOpen2_64((const void*)filename.c_str(), (overwrite==2) ? 2 : 0, NULL, &KrkrFileFuncDef)) == NULL) {
 			// オープン失敗
 			ttstr msg = filename + " can't open.";
 			TVPThrowExceptionMessage(msg.c_str());
@@ -222,6 +222,7 @@ public:
 	 * @param destname 登録名（パスを含む）
 	 * @param compressLevel 圧縮レベル
 	 * @param password パスワード指定
+         * @param compressionMethod 圧縮方法
 	 * @return 追加に成功したら true
 	 */
 	static tjs_error TJS_INTF_METHOD add(tTJSVariant *result,
@@ -236,13 +237,20 @@ public:
 		
 		ttstr srcname  = *param[0];
 		ttstr destname = *param[1];
-		int   compressLevel = numparams > 2 ? (int)*param[2] : Z_DEFAULT_COMPRESSION;
+		int   compressLevel = Z_DEFAULT_COMPRESSION;
+                if (numparams > 2 && param[2]->Type() == tvtInteger) {
+                  compressLevel = (int)*param[2];
+                }
 		bool usePassword = false;
 		ttstr password;
 		if (numparams > 3 && param[3]->Type() == tvtString) {
 			usePassword = true;
 			password = *param[3];
 		}
+                int compressionMethod = MZ_COMPRESS_METHOD_DEFLATE;
+                if (numparams > 4 && param[4]->Type() == tvtInteger) {
+                  compressionMethod = (int)*param[4];
+                }
 
 		// ファイル名
 		ttstr filename = TVPGetPlacedPath(srcname);
@@ -302,7 +310,7 @@ public:
 			// UTF8で格納する
 			if (zipOpenNewFileInZip4(self->zf, NarrowString(destname, true), &zi,
 									 NULL,0,NULL,0,NULL /* comment*/,
-									 (compressLevel != 0) ? Z_DEFLATED : 0,
+									 (compressLevel != 0) ? compressionMethod : 0,
 									 compressLevel, 0,
 									 -MAX_WBITS, DEF_MEM_LEVEL, Z_DEFAULT_STRATEGY,
 									 usePassword ? (const char*)NarrowString(password) : NULL,
@@ -369,20 +377,37 @@ public:
 	/**
 	 * ZIPファイルを開く
 	 * @param filename ファイル名
+	 * @param force_utf8 UTF8強制指定 0: SJIS/UTF8自動判定 1:強制
 	 */
-	void open(const tjs_char *filename) {
-		if ((uf = unzOpen2_64((const void*)filename, &TVPZlibFileFunc)) == NULL) {
-			ttstr msg = filename;
-			msg += L" can't open.";
-			TVPThrowExceptionMessage(msg.c_str());
-		}
-		// UTF8なファイル名かどうかの判定。最初のファイルで決める
-		unzGoToFirstFile(uf);
-		unz_file_info file_info;
-		if (unzGetCurrentFileInfo(uf,&file_info, NULL,0,NULL,0,NULL,0) == UNZ_OK) {
-			utf8 = (file_info.flag & FLAG_UTF8) != 0;
-		}
-	}
+    static tjs_error TJS_INTF_METHOD open(tTJSVariant *result,
+                                          tjs_int numparams,
+                                          tTJSVariant **param,
+                                          Unzip *self) {
+      if (numparams < 1) return TJS_E_BADPARAMCOUNT;
+      
+      ttstr filename = *param[0];
+      if ((self->uf = unzOpen2_64((const void*)filename.c_str(), &KrkrFileFuncDef)) == NULL) {
+        ttstr msg = filename;
+        msg += L" can't open.";
+        TVPThrowExceptionMessage(msg.c_str());
+      }
+      
+      // UTF8なファイル名かどうかの判定。
+      if (numparams > 1
+          && (int)*param[1]) {
+        // 第二引数がtrueならutf8強制
+        self->utf8 = true;
+      } else  {
+        // 最初のファイルで決める
+        unzGoToFirstFile(self->uf);
+        unz_file_info file_info;
+        if (unzGetCurrentFileInfo(self->uf,&file_info, NULL,0,NULL,0,NULL,0) == UNZ_OK) {
+          self->utf8 = (file_info.flag & FLAG_UTF8) != 0;
+        }
+      }
+
+      return TJS_S_OK;
+    }
 
 	/**
 	 * ZIP ファイルを閉じる
@@ -416,7 +441,7 @@ public:
 			
 			if (unzGetCurrentFileInfo(self->uf, &file_info, filename_inzip, sizeof(filename_inzip),NULL,0,NULL,0) == UNZ_OK) {
 				
-				iTJSDispatch2 *obj;
+                          iTJSDispatch2 *obj;
 				if ((obj = TJSCreateDictionaryObject()) != NULL) {
 					
 					ttstr filename;
@@ -528,11 +553,15 @@ NCB_REGISTER_CLASS(Zip) {
 	RawCallback("open", &ClassT::open, 0);
 	NCB_METHOD(close);
 	RawCallback("add", &ClassT::add, 0);
+        Variant("CompressionMethodStore", MZ_COMPRESS_METHOD_STORE);
+        Variant("CompressionMethodDeflate", MZ_COMPRESS_METHOD_DEFLATE);
+        Variant("CompressionMethodBzip2", MZ_COMPRESS_METHOD_BZIP2);
+        Variant("CompressionMethodLzma", MZ_COMPRESS_METHOD_LZMA);
 }
 
 NCB_REGISTER_CLASS(Unzip) {
 	Constructor();
-	NCB_METHOD(open);
+	RawCallback("open", &ClassT::open, 0);
 	NCB_METHOD(close);
 	RawCallback("list", &ClassT::list, 0);
 	RawCallback("extract", &ClassT::extract, 0);
