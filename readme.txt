@@ -12,19 +12,29 @@ Multi volume ZipFile (span) are not supported.
 Encryption compatible with pkzip 2.04g only supported
 Old compressions used by old PKZip 1.x are not supported
 
-●使い方
-
-manual.tjs 参照
-
-●注意点
-
-ビルドにはWindows用のcmakeが必要です。
-https://cmake.org/ から最新の安定版をダウンロードし、
-パスが通っている箇所にインストールしておいて下さい。
-
 ●ライセンス
 
 zlib 付属の contrib/minizip からfork した nmoinvaz/minizip
 (https://github.com/nmoinvaz/minizip) をプラグイン化したものです
 zlib ライセンスになります。
+
+●ビルド
+
+ビルドにはWindows用のcmakeが必要です。
+
+VisualStudio のコマンドラインから以下で対応
+
+```
+cmake -B build
+cmake --build build --config Release
+
+build/Release/minizip.dll
+
+```
+
+●使い方
+
+manual.tjs 参照
+
+
 

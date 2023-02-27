@@ -23,7 +23,7 @@ static const char *copyright =
 #include <direct.h>
 #include <io.h>
 
-#include "ncbind/ncbind.hpp"
+#include <ncbind.hpp>
 #include "mz_compat.h"
 #include "mz_strm.h"
 #include "zlib.h"
@@ -34,18 +34,18 @@ static const char *copyright =
 #define CASESENSITIVITY (0)
 #define MAXFILENAME (256)
 
-// UTF8‚Èƒtƒ@ƒCƒ‹–¼‚©‚Ç‚¤‚©‚Ìƒtƒ‰ƒO
+// UTF8ãªãƒ•ã‚¡ã‚¤ãƒ«åã‹ã©ã†ã‹ã®ãƒ•ãƒ©ã‚°
 #define FLAG_UTF8 (1<<11)
 
-// ƒtƒ@ƒCƒ‹ƒAƒNƒZƒX—p
+// ãƒ•ã‚¡ã‚¤ãƒ«ã‚¢ã‚¯ã‚»ã‚¹ç”¨
 extern  zlib_filefunc_def KrkrFileFuncDef;
 
-// Date ƒNƒ‰ƒXƒƒ“ƒo
-static iTJSDispatch2 *dateClass = NULL;    // Date ‚ÌƒNƒ‰ƒXƒIƒuƒWƒFƒNƒg
-static iTJSDispatch2 *dateSetTime = NULL;  // Date.setTime ƒƒ\ƒbƒh
+// Date ã‚¯ãƒ©ã‚¹ãƒ¡ãƒ³ãƒ
+static iTJSDispatch2 *dateClass = NULL;    // Date ã®ã‚¯ãƒ©ã‚¹ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆ
+static iTJSDispatch2 *dateSetTime = NULL;  // Date.setTime ãƒ¡ã‚½ãƒƒãƒ‰
 
 /**
- * int ‚Å«‘‚©‚ç—v‘f‚ğæ“¾
+ * int ã§è¾æ›¸ã‹ã‚‰è¦ç´ ã‚’å–å¾—
  */
 static int
 getIntProp(tTJSVariant &options, const tjs_char *name, int defaultValue)
@@ -61,7 +61,7 @@ getIntProp(tTJSVariant &options, const tjs_char *name, int defaultValue)
 }
 
 /**
- * int ‚Å”z—ñ‚©‚ç—v‘f‚ğæ“¾
+ * int ã§é…åˆ—ã‹ã‚‰è¦ç´ ã‚’å–å¾—
  */
 static int
 getIntProp(tTJSVariant &options, int num, int defaultValue)
@@ -77,7 +77,7 @@ getIntProp(tTJSVariant &options, int num, int defaultValue)
 }
 
 /**
- * •¶š—ñ‚Å«‘‚©‚ç—v‘f‚ğæ“¾
+ * æ–‡å­—åˆ—ã§è¾æ›¸ã‹ã‚‰è¦ç´ ã‚’å–å¾—
  */
 static ttstr
 getStrProp(tTJSVariant &options, const tjs_char *name, ttstr &defaultValue)
@@ -93,7 +93,7 @@ getStrProp(tTJSVariant &options, const tjs_char *name, ttstr &defaultValue)
 }
 
 /**
- * •¶š—ñ‚Å”z—ñ‚©‚ç—v‘f‚ğæ“¾
+ * æ–‡å­—åˆ—ã§é…åˆ—ã‹ã‚‰è¦ç´ ã‚’å–å¾—
  */
 static ttstr
 getStrProp(tTJSVariant &options, int num, ttstr &defaultValue)
@@ -108,29 +108,29 @@ getStrProp(tTJSVariant &options, int num, ttstr &defaultValue)
 	return defaultValue;
 }
 
-// ƒIƒuƒWƒFƒNƒg‚É”’l‚ğŠi”[
+// ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã«æ•°å€¤ã‚’æ ¼ç´
 static void setIntProp(iTJSDispatch2 *obj, const tjs_char *name, int value)
 {
 	tTJSVariant var = value;
 	obj->PropSet(TJS_MEMBERENSURE, name,  NULL, &var, obj);
 }
 
-// ƒIƒuƒWƒFƒNƒg‚É•¶š—ñ‚ğŠi”[
+// ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã«æ–‡å­—åˆ—ã‚’æ ¼ç´
 static void setStrProp(iTJSDispatch2 *obj, const tjs_char *name, ttstr &value)
 {
 	tTJSVariant var = value;
 	obj->PropSet(TJS_MEMBERENSURE, name,  NULL, &var, obj);
 }
 
-// ƒIƒuƒWƒFƒNƒg‚É“ú‚ğŠi”[
+// ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã«æ—¥æ™‚ã‚’æ ¼ç´
 static void setDateProp(iTJSDispatch2 *obj, const tjs_char *name, FILETIME &filetime)
 {
-	// ƒtƒ@ƒCƒ‹¶¬
+	// ãƒ•ã‚¡ã‚¤ãƒ«ç”Ÿæˆæ™‚
 	tjs_uint64 ft = filetime.dwHighDateTime * 0x100000000 | filetime.dwLowDateTime;
 	if (ft > 0) {
 		iTJSDispatch2 *date;
 		if (TJS_SUCCEEDED(dateClass->CreateNew(0, NULL, NULL, &date, 0, NULL, obj))) {
-			// UNIX TIME ‚É•ÏŠ·
+			// UNIX TIME ã«å¤‰æ›
 			tjs_int64 unixtime = (ft - 0x19DB1DED53E8000 ) / 10000;
 			tTJSVariant time(unixtime);
 			tTJSVariant *param[] = { &time };
@@ -144,7 +144,7 @@ static void setDateProp(iTJSDispatch2 *obj, const tjs_char *name, FILETIME &file
 }
 
 /**
- * ZIPˆ³kˆ—ƒNƒ‰ƒX
+ * ZIPåœ§ç¸®å‡¦ç†ã‚¯ãƒ©ã‚¹
  */
 class Zip {
 
@@ -154,13 +154,13 @@ protected:
 public:
 
 	/**
-	 * ƒRƒ“ƒXƒgƒ‰ƒNƒ^
+	 * ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿
 	 */
 	Zip() : zf(NULL) {
 	}
 
 	/**
-	 * ƒfƒXƒgƒ‰ƒNƒ^
+	 * ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿
 	 */
 	~Zip(){
 		close();
@@ -169,9 +169,9 @@ public:
 public:
 
 	/**
-	 * ZIPƒtƒ@ƒCƒ‹‚ğŠJ‚­
-	 * @param filename ƒtƒ@ƒCƒ‹–¼
-	 * @param overwrite ã‘‚«w’è 1:ã‘‚« 2:’Ç‰Á
+	 * ZIPãƒ•ã‚¡ã‚¤ãƒ«ã‚’é–‹ã
+	 * @param filename ãƒ•ã‚¡ã‚¤ãƒ«å
+	 * @param overwrite ä¸Šæ›¸ãæŒ‡å®š 1:ä¸Šæ›¸ã 2:è¿½åŠ 
 	 */
 	static tjs_error TJS_INTF_METHOD open(tTJSVariant *result,
 										  tjs_int numparams,
@@ -183,7 +183,7 @@ public:
 		ttstr filename        = *param[0];
 		int overwrite = numparams > 1 ? (int)*param[1] : 0;
 		
-		if (overwrite == 2) { // ’Ç‹L
+		if (overwrite == 2) { // è¿½è¨˜
 			ttstr path = TVPGetPlacedPath(filename);
 			if (!path.length()) {
 				overwrite = 1;
@@ -191,14 +191,14 @@ public:
 		} else if (overwrite == 0) {
 			ttstr path = TVPGetPlacedPath(filename);
 			if (path.length()) {
-				// Šù‚É‘¶İ‚µ‚Ä‚¢‚é
+				// æ—¢ã«å­˜åœ¨ã—ã¦ã„ã‚‹
 				ttstr msg = filename + " exists.";
 				TVPThrowExceptionMessage(msg.c_str());
 			}
 		}
 
 		if ((self->zf = zipOpen2_64((const void*)filename.c_str(), (overwrite==2) ? 2 : 0, NULL, &KrkrFileFuncDef)) == NULL) {
-			// ƒI[ƒvƒ“¸”s
+			// ã‚ªãƒ¼ãƒ—ãƒ³å¤±æ•—
 			ttstr msg = filename + " can't open.";
 			TVPThrowExceptionMessage(msg.c_str());
 		}
@@ -207,7 +207,7 @@ public:
 	}
 
 	/**
-	 * ƒtƒ@ƒCƒ‹‚ğ•Â‚¶‚é
+	 * ãƒ•ã‚¡ã‚¤ãƒ«ã‚’é–‰ã˜ã‚‹
 	 */
 	void close() {
 		if (zf) {
@@ -217,13 +217,13 @@ public:
 	}
 	
 	/**
-	 * ƒtƒ@ƒCƒ‹‚Ì’Ç‰Á
-	 * @param srcname  ’Ç‰Á‚·‚éƒtƒ@ƒCƒ‹
-	 * @param destname “o˜^–¼iƒpƒX‚ğŠÜ‚Şj
-	 * @param compressLevel ˆ³kƒŒƒxƒ‹
-	 * @param password ƒpƒXƒ[ƒhw’è
-         * @param compressionMethod ˆ³k•û–@
-	 * @return ’Ç‰Á‚É¬Œ÷‚µ‚½‚ç true
+	 * ãƒ•ã‚¡ã‚¤ãƒ«ã®è¿½åŠ 
+	 * @param srcname  è¿½åŠ ã™ã‚‹ãƒ•ã‚¡ã‚¤ãƒ«
+	 * @param destname ç™»éŒ²åï¼ˆãƒ‘ã‚¹ã‚’å«ã‚€ï¼‰
+	 * @param compressLevel åœ§ç¸®ãƒ¬ãƒ™ãƒ«
+	 * @param password ãƒ‘ã‚¹ãƒ¯ãƒ¼ãƒ‰æŒ‡å®š
+         * @param compressionMethod åœ§ç¸®æ–¹æ³•
+	 * @return è¿½åŠ ã«æˆåŠŸã—ãŸã‚‰ true
 	 */
 	static tjs_error TJS_INTF_METHOD add(tTJSVariant *result,
 										 tjs_int numparams,
@@ -247,27 +247,31 @@ public:
 			usePassword = true;
 			password = *param[3];
 		}
-                int compressionMethod = MZ_COMPRESS_METHOD_DEFLATE;
-                if (numparams > 4 && param[4]->Type() == tvtInteger) {
-                  compressionMethod = (int)*param[4];
-                }
+		int compressionMethod = MZ_COMPRESS_METHOD_DEFLATE;
+		if (numparams > 4 && param[4]->Type() == tvtInteger) {
+			compressionMethod = (int)*param[4];
+		}
+		bool ignoreDate = false;
+		if (numparams > 5 && param[5]->Type() == tvtInteger) {
+			ignoreDate = (int)*param[5] != 0;
+		}
 
-		// ƒtƒ@ƒCƒ‹–¼
+		// ãƒ•ã‚¡ã‚¤ãƒ«å
 		ttstr filename = TVPGetPlacedPath(srcname);
 		if (filename.length() == 0) {
 			ttstr msg = srcname + " not exists.";
 			TVPThrowExceptionMessage(msg.c_str());
 		}
 		
-		// ƒtƒ@ƒCƒ‹î•ñæ“¾
+		// ãƒ•ã‚¡ã‚¤ãƒ«æ™‚åˆ»æƒ…å ±å–å¾—
 		zip_fileinfo zi;
 		memset(&zi, 0, sizeof zi);
-		{
+		if (!ignoreDate) {
 			SYSTEMTIME time;
-			GetLocalTime(&time); // Œ»İ
+			GetLocalTime(&time); // ç¾åœ¨æ™‚åˆ»
 			ttstr name(TVPGetLocallyAccessibleName(filename));
 			if (name.length() > 0) {
-				// Àƒtƒ@ƒCƒ‹‚ª‘¶İ‚·‚éê‡‚Í‚ğ”²‚¢‚Ä‚­‚é
+				// å®Ÿãƒ•ã‚¡ã‚¤ãƒ«ãŒå­˜åœ¨ã™ã‚‹å ´åˆã¯æ™‚åˆ»ã‚’æŠœã„ã¦ãã‚‹
 				HANDLE hFile;
 				if ((hFile = CreateFileW(name.c_str(), GENERIC_READ, 0, NULL ,
 										 OPEN_EXISTING , FILE_ATTRIBUTE_NORMAL , NULL)) != INVALID_HANDLE_VALUE) {
@@ -293,7 +297,7 @@ public:
 		IStream *in = TVPCreateIStream(filename, TJS_BS_READ);
 		if (in) {
 			
-			// CRCŒvZ
+			// CRCè¨ˆç®—
 			unsigned long crcFile=0;
 			if (usePassword) {
 				char buf[BUFFERSIZE];
@@ -301,13 +305,13 @@ public:
 				while (in->Read(buf, sizeof buf, &size) == S_OK && size > 0) {
 					crcFile = crc32(crcFile, (const Bytef *)buf, size);
 				}
-				// ˆÊ’u‚ğ‚à‚Ç‚·
+				// ä½ç½®ã‚’ã‚‚ã©ã™
 				LARGE_INTEGER move = {0};
 				ULARGE_INTEGER newposition;
 				in->Seek(move, STREAM_SEEK_CUR, &newposition);
 			}
-			// ƒtƒ@ƒCƒ‹‚Ì’Ç‰Á
-			// UTF8‚ÅŠi”[‚·‚é
+			// ãƒ•ã‚¡ã‚¤ãƒ«ã®è¿½åŠ 
+			// UTF8ã§æ ¼ç´ã™ã‚‹
 			if (zipOpenNewFileInZip4(self->zf, NarrowString(destname, true), &zi,
 									 NULL,0,NULL,0,NULL /* comment*/,
 									 (compressLevel != 0) ? compressionMethod : 0,
@@ -338,7 +342,7 @@ public:
 
 #include <vector>
 
-// ƒtƒ@ƒCƒ‹–¼•ÏŠ·ˆ—
+// ãƒ•ã‚¡ã‚¤ãƒ«åå¤‰æ›å‡¦ç†
 void
 storeFilename(ttstr &name, const char *narrowName, bool utf8)
 {
@@ -358,7 +362,7 @@ storeFilename(ttstr &name, const char *narrowName, bool utf8)
 }
 
 /**
- * Zip “WŠJƒNƒ‰ƒX
+ * Zip å±•é–‹ã‚¯ãƒ©ã‚¹
  */
 class Unzip {
 
@@ -375,9 +379,9 @@ public:
 	}
 
 	/**
-	 * ZIPƒtƒ@ƒCƒ‹‚ğŠJ‚­
-	 * @param filename ƒtƒ@ƒCƒ‹–¼
-	 * @param force_utf8 UTF8‹­§w’è 0: SJIS/UTF8©“®”»’è 1:‹­§
+	 * ZIPãƒ•ã‚¡ã‚¤ãƒ«ã‚’é–‹ã
+	 * @param filename ãƒ•ã‚¡ã‚¤ãƒ«å
+	 * @param force_utf8 UTF8å¼·åˆ¶æŒ‡å®š 0: SJIS/UTF8è‡ªå‹•åˆ¤å®š 1:å¼·åˆ¶
 	 */
     static tjs_error TJS_INTF_METHOD open(tTJSVariant *result,
                                           tjs_int numparams,
@@ -392,13 +396,13 @@ public:
         TVPThrowExceptionMessage(msg.c_str());
       }
       
-      // UTF8‚Èƒtƒ@ƒCƒ‹–¼‚©‚Ç‚¤‚©‚Ì”»’èB
+      // UTF8ãªãƒ•ã‚¡ã‚¤ãƒ«åã‹ã©ã†ã‹ã®åˆ¤å®šã€‚
       if (numparams > 1
           && (int)*param[1]) {
-        // ‘æ“ñˆø”‚ªtrue‚È‚çutf8‹­§
+        // ç¬¬äºŒå¼•æ•°ãŒtrueãªã‚‰utf8å¼·åˆ¶
         self->utf8 = true;
       } else  {
-        // Å‰‚Ìƒtƒ@ƒCƒ‹‚ÅŒˆ‚ß‚é
+        // æœ€åˆã®ãƒ•ã‚¡ã‚¤ãƒ«ã§æ±ºã‚ã‚‹
         unzGoToFirstFile(self->uf);
         unz_file_info file_info;
         if (unzGetCurrentFileInfo(self->uf,&file_info, NULL,0,NULL,0,NULL,0) == UNZ_OK) {
@@ -410,7 +414,7 @@ public:
     }
 
 	/**
-	 * ZIP ƒtƒ@ƒCƒ‹‚ğ•Â‚¶‚é
+	 * ZIP ãƒ•ã‚¡ã‚¤ãƒ«ã‚’é–‰ã˜ã‚‹
 	 */
 	void close() {
 		if (uf) {
@@ -420,8 +424,8 @@ public:
 	}
 
 	/**
-	 * ƒtƒ@ƒCƒ‹ƒŠƒXƒgæ“¾
-	 * @return ƒtƒ@ƒCƒ‹î•ñi«‘j‚Ì”z—ñ
+	 * ãƒ•ã‚¡ã‚¤ãƒ«ãƒªã‚¹ãƒˆå–å¾—
+	 * @return ãƒ•ã‚¡ã‚¤ãƒ«æƒ…å ±ï¼ˆè¾æ›¸ï¼‰ã®é…åˆ—
 	 */
 	static tjs_error TJS_INTF_METHOD list(tTJSVariant *result,
 										  tjs_int numparams,
@@ -455,7 +459,7 @@ public:
 					setIntProp(obj, L"deflateLevel", (file_info.flag & 0x6)/2);
 					setIntProp(obj, L"crc", file_info.crc);
 
-					// “ú•tî•ñ
+					// æ—¥ä»˜æƒ…å ±
 					FILETIME date;
 					{
 						SYSTEMTIME time;
@@ -489,10 +493,10 @@ public:
 	}
 	
 	/**
-	 * ƒtƒ@ƒCƒ‹‚Ì“WŠJ
-	 * @param srcname “WŠJŒ³ƒtƒ@ƒCƒ‹
-	 * @param destfile “WŠJæƒtƒ@ƒCƒ‹
-	 * @param password ƒpƒXƒ[ƒhw’è
+	 * ãƒ•ã‚¡ã‚¤ãƒ«ã®å±•é–‹
+	 * @param srcname å±•é–‹å…ƒãƒ•ã‚¡ã‚¤ãƒ«
+	 * @param destfile å±•é–‹å…ˆãƒ•ã‚¡ã‚¤ãƒ«
+	 * @param password ãƒ‘ã‚¹ãƒ¯ãƒ¼ãƒ‰æŒ‡å®š
 	 */
 	static tjs_error TJS_INTF_METHOD extract(tTJSVariant *result,
 											 tjs_int numparams,
@@ -571,7 +575,7 @@ extern void initZipStorage();
 extern void doneZipStorage();
 
 /**
- * “o˜^ˆ—‘O
+ * ç™»éŒ²å‡¦ç†å‰
  */
 static void PreRegistCallback()
 {
@@ -580,7 +584,7 @@ static void PreRegistCallback()
 }
 
 /**
- * “o˜^ˆ—Œã
+ * ç™»éŒ²å‡¦ç†å¾Œ
  */
 static void PostRegistCallback()
 {
@@ -594,7 +598,7 @@ static void PostRegistCallback()
 #define RELEASE(name) name->Release();name= NULL
 
 /**
- * ŠJ•úˆ—‘O
+ * é–‹æ”¾å‡¦ç†å‰
  */
 static void PreUnregistCallback()
 {
@@ -603,7 +607,7 @@ static void PreUnregistCallback()
 }
 
 /**
- * ŠJ•úˆ—Œã
+ * é–‹æ”¾å‡¦ç†å¾Œ
  */
 static void PostUnregistCallback()
 {
