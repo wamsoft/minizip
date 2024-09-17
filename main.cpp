@@ -269,7 +269,8 @@ public:
 		if (!ignoreDate) {
 			SYSTEMTIME time;
 			GetLocalTime(&time); // 現在時刻
-			ttstr name(TVPGetLocallyAccessibleName(filename));
+			ttstr name = filename;
+			TVPGetLocalName(name);
 			if (name.length() > 0) {
 				// 実ファイルが存在する場合は時刻を抜いてくる
 				HANDLE hFile;

@@ -13,10 +13,10 @@ public:
 	NarrowString(const ttstr &str, bool utf8=false) : _data(NULL) {
 		if (utf8) {
 			const tjs_char *n = str.c_str();
-			int	len = ::WideCharToMultiByte(CP_UTF8, 0, n, -1, NULL, 0, NULL, NULL);
+			int len = TVPWideCharToUtf8String(n, NULL);
 			if (len > 0) {
 				_data = new tjs_nchar[len + 1];
-				::WideCharToMultiByte(CP_UTF8, 0, n, -1, _data, len, NULL, NULL);
+				TVPWideCharToUtf8String(n, _data);
 				_data[len] = '\0';
 			}
 		} else {

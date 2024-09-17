@@ -25,7 +25,8 @@ zlib ライセンスになります。
 VisualStudio のコマンドラインから以下で対応
 
 ```
-cmake -B build
+# win32指定しないとx64になる場合あり
+cmake -A win32 -B build
 cmake --build build --config Release
 
 build/Release/minizip.dll

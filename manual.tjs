@@ -28,6 +28,9 @@ class Zip {
 	function open(filename, overwrite=0);
 
 	/**
+
+
+	
 	 * アーカイブにファイルを追加します
 	 * @param srcfile 追加するファイル（吉里吉里ストレージ名）
 	 * @param destfile アーカイブ中での名前(アーカイブ内パス名）
