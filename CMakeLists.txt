@@ -12,16 +12,22 @@ set(PROJECT_VERSION 1.00)
 
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION})
 
+find_package(minizip-ng CONFIG REQUIRED)
+
 if(NOT TARGET ncbind)
 add_subdirectory(../ncbind ${CMAKE_CURRENT_BINARY_DIR}/ncbind)
 endif()
 
-add_subdirectory(minizip)
+# add_subdirectory(minizip)
 
 add_library(${PROJECT_NAME} SHARED
     ioapi.cpp
     main.cpp
     storage.cpp
+)
+
+target_compile_definitions(${PROJECT_NAME} PUBLIC
+	MZ_COMPAT_VERSION=100
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -30,5 +36,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
     ncbind
-    libminizip
+	MINIZIP::minizip-ng
+    # libminizip
 )
