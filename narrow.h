@@ -1,8 +1,6 @@
 #ifndef __NARROW_STRING__
 #define __NARROW_STRING__
 
-#include <windows.h>
-
 /**
  * C文字列処理用
  */

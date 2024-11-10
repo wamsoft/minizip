@@ -1,0 +1,7 @@
+{
+  "name": "minizip",
+  "version": "0.0.1",
+  "dependencies": [
+    "minizip-ng"
+  ]
+}

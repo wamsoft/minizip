@@ -1,185 +1,98 @@
-#include <windows.h>
 #include <stdio.h>
+#include <windows.h>
 #include "tp_stub.h"
-#include "mz.h"
-#include "mz_strm.h"
 #include "mz_compat.h"
 
-
-extern mz_stream_vtbl KrkrMzStreamVtbl;
-
-struct KrkrMzStream
+static void* ZCALLBACK fopen64_file_func (void* opaque, const void* filename, int mode)
 {
-  mz_stream stream;
-  IStream *file;
-  bool initalized;
-
-  KrkrMzStream()
-    : file(NULL)
-    , initalized(false)
-  {
-    memset(&stream, 0, sizeof(stream));
-    stream.vtbl = &KrkrMzStreamVtbl;
-  }
-};
-
-int32_t
-krkr_mz_stream_open (void *stream, const char *filename, int mode)
-{
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  int tjsmode = 0;
-  if ((mode & MZ_OPEN_MODE_READWRITE)==MZ_OPEN_MODE_READ)
-    tjsmode = TJS_BS_READ;
-  else
-    if (mode & MZ_OPEN_MODE_EXISTING)
-      tjsmode= TJS_BS_APPEND;
+	iTJSBinaryStream* file = NULL;
+	int tjsmode = 0;
+	if ((mode & ZLIB_FILEFUNC_MODE_READWRITEFILTER)==ZLIB_FILEFUNC_MODE_READ)
+		tjsmode = TJS_BS_READ;
     else
-      if (mode & MZ_OPEN_MODE_CREATE)
-        tjsmode = TJS_BS_WRITE;
-  
-  if ((filename!=NULL)) {
-    kstream->file = TVPCreateIStream(ttstr((const tjs_char*)filename), tjsmode);
-    kstream->initalized = true;
-  }
-  return MZ_OK;
+    if (mode & ZLIB_FILEFUNC_MODE_EXISTING)
+		tjsmode= TJS_BS_APPEND;
+	else
+    if (mode & ZLIB_FILEFUNC_MODE_CREATE)
+		tjsmode = TJS_BS_WRITE;
+	
+	if ((filename!=NULL)) {
+		file = TVPCreateStream(ttstr((const tjs_char*)filename), tjsmode);
+	}
+  return file;
 }
 
-int32_t
-krkr_mz_stream_is_open(void *stream)
+
+static unsigned long ZCALLBACK fread_file_func (void* opaque, void* stream, void* buf, unsigned long size)
 {
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  if (! kstream->initalized)
-    return MZ_OPEN_ERROR;
-  return MZ_OK;
+	iTJSBinaryStream *is = (iTJSBinaryStream*)stream;
+	if (is) {
+		return is->Read(buf,size);
+	}
+	return 0;
 }
 
-int32_t
-krkr_mz_stream_read(void *stream, void* buf, int32_t size)
+static unsigned long ZCALLBACK fwrite_file_func (void* opaque, void* stream, const void* buf, unsigned long size)
 {
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  IStream *is = kstream->file;
-  if (is) {
-    ULONG len;
-    if (is->Read(buf,size,&len) == S_OK) {
-      return len;
-    }
-  }
-  return MZ_DATA_ERROR;
+	iTJSBinaryStream *is = (iTJSBinaryStream*)stream;
+	if (is) {
+		return is->Write(buf,size);
+	}
+	return 0;
 }
 
-int32_t
-krkr_mz_stream_write(void *stream, const void* buf, int32_t size)
+static ZPOS64_T ZCALLBACK ftell64_file_func (void* opaque, void* stream)
 {
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  IStream *is = kstream->file;
-  if (is) {
-    DWORD len;
-    if (is->Write(buf,size,&len) == S_OK) {
-      return len;
-    }
-  }
-  return MZ_DATA_ERROR;
+	iTJSBinaryStream *is = (iTJSBinaryStream *)stream;
+	if (is) {
+    return is->Seek(0, TJS_BS_SEEK_CUR);
+	}
+	return -1;
 }
 
-int64_t
-krkr_mz_stream_tell (void *stream)
+static long ZCALLBACK fseek64_file_func (void*  opaque, void* stream, ZPOS64_T offset, int origin)
 {
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  IStream *is = kstream->file;
-  if (is) {
-    LARGE_INTEGER move = {0};
-    ULARGE_INTEGER newposition;
-    if (is->Seek(move, STREAM_SEEK_CUR, &newposition) == S_OK) {
-      return newposition.QuadPart;
-    }
-  }
-  return MZ_TELL_ERROR;
+	tjs_int dwOrigin;
+	switch(origin) {
+	case ZLIB_FILEFUNC_SEEK_CUR: dwOrigin = TJS_BS_SEEK_CUR; break;
+	case ZLIB_FILEFUNC_SEEK_END: dwOrigin = TJS_BS_SEEK_END; break;
+	case ZLIB_FILEFUNC_SEEK_SET: dwOrigin = TJS_BS_SEEK_SET; break;
+	default: return -1; //failed
+	}
+	iTJSBinaryStream *is = (iTJSBinaryStream *)stream;
+	if (is) {
+    return is->Seek(offset, dwOrigin);
+	}
+	return -1;
 }
 
-int32_t
-krkr_mz_stream_seek(void *stream, int64_t offset, int32_t origin)
+
+static int ZCALLBACK fclose_file_func (void* opaque, void* stream)
 {
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  IStream *is = kstream->file;
-
-  DWORD dwOrigin;
-  switch(origin) {
-  case MZ_SEEK_CUR: dwOrigin = STREAM_SEEK_CUR; break;
-  case MZ_SEEK_END: dwOrigin = STREAM_SEEK_END; break;
-  case MZ_SEEK_SET: dwOrigin = STREAM_SEEK_SET; break;
-  default: return MZ_SEEK_ERROR; //failed
-  }
-  if (is) {
-    LARGE_INTEGER move;
-    move.QuadPart = offset;
-    ULARGE_INTEGER newposition;
-    if (is->Seek(move, origin, &newposition) == S_OK) {
-      return MZ_OK;
-    }
-  }
-  return MZ_SEEK_ERROR;
+	iTJSBinaryStream *is = (iTJSBinaryStream *)stream;
+	if (is) {
+		is->Destruct();
+		return 0;
+	}
+	return EOF;
 }
 
-int32_t
-krkr_mz_stream_close(void *stream)
+static int ZCALLBACK ferror_file_func (void* opaque, void* stream)
 {
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  IStream *is = kstream->file;
-  if (is) {
-    is->Release();
-    is = NULL;
-    kstream->file = NULL;
-    kstream->initalized = false;
-    return MZ_OK;
-  }
-  return MZ_CLOSE_ERROR;
+	iTJSBinaryStream *is = (iTJSBinaryStream *)stream;
+	if (is) {
+		return 0;
+	}
+	return EOF;
 }
 
-int32_t
-krkr_mz_stream_error(void *stream)
-{
-  KrkrMzStream *kstream = (KrkrMzStream*)stream;
-  IStream *is = kstream->file;
-  if (is) {
-    return MZ_OK;
-  }
-  return MZ_STREAM_ERROR;
-}
-
-void*
-krkr_mz_stream_create(void **stream)
-{
-  KrkrMzStream *kstream = new KrkrMzStream();
-  if (stream != NULL)
-    *stream = kstream;
-  return kstream;
-}
-
-void
-krkr_mz_stream_destroy(void **stream)
-{
-  if (stream == NULL)
-    return;
-  KrkrMzStream *kstream = (KrkrMzStream*)*stream;
-  delete kstream;
-  *stream = NULL;
-}
-
-mz_stream_vtbl
-KrkrMzStreamVtbl =
-  {
-   krkr_mz_stream_open,
-   krkr_mz_stream_is_open,
-   krkr_mz_stream_read,
-   krkr_mz_stream_write,
-   krkr_mz_stream_tell,
-   krkr_mz_stream_seek,
-   krkr_mz_stream_close,
-   krkr_mz_stream_error,
-   krkr_mz_stream_create,
-   krkr_mz_stream_destroy,
-   NULL,
-   NULL,
-  };
-
-zlib_filefunc_def KrkrFileFuncDef = &KrkrMzStreamVtbl;
+zlib_filefunc64_def TVPZlibFileFunc = {
+	fopen64_file_func,
+	fread_file_func,
+	fwrite_file_func,
+	ftell64_file_func,
+	fseek64_file_func,
+	fclose_file_func,
+	ferror_file_func,
+	NULL
+};

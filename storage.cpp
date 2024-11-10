@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
 #include <ncbind.hpp>
 #include <map>
 #include <vector>
@@ -8,8 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "mz_compat.h"
-#include "mz_strm.h"
-#include "zlib.h"
 
 #include "narrow.h"
 
@@ -22,7 +19,7 @@
 extern void storeFilename(ttstr &name, const char *narrowName, bool utf8);
 
 // ファイルアクセス用
-extern  zlib_filefunc_def KrkrFileFuncDef;
+extern zlib_filefunc64_def TVPZlibFileFunc;
 
 /**
  * Zip 展開処理クラス
@@ -52,7 +49,7 @@ public:
 	 */
 	bool init(const ttstr &filename) {
 		done();
-		if ((uf = unzOpen2_64((const void*)filename.c_str(), &KrkrFileFuncDef)) != NULL) {
+		if ((uf = unzOpen2_64((const void*)filename.c_str(), &TVPZlibFileFunc)) != NULL) {
 			lock();
 			unzGoToFirstFile(uf);
 			unz_file_info file_info;
@@ -224,146 +221,61 @@ private:
 /**
  * ZIP展開ストリームクラス
  */
-class UnzipStream : public IStream {
+class UnzipStream : public iTJSBinaryStream {
 
 public:
 	/**
 	 * コンストラクタ
 	 */
-	UnzipStream(UnzipBase *unzip) : refCount(1), unzip(unzip) {
+	UnzipStream(UnzipBase *unzip) : unzip(unzip), size(0) {
 		unzip->AddRef();
 	};
 
-	// IUnknown
-	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppvObject) {
-		if (riid == IID_IUnknown || riid == IID_ISequentialStream || riid == IID_IStream) {
-			if (ppvObject == NULL)
-				return E_POINTER;
-			*ppvObject = this;
-			AddRef();
-			return S_OK;
-		} else {
-			*ppvObject = 0;
-			return E_NOINTERFACE;
-		}
-	}
-
-	ULONG STDMETHODCALLTYPE AddRef(void) {
-		refCount++;
-		return refCount;
-	}
-	
-	ULONG STDMETHODCALLTYPE Release(void) {
-		int ret = --refCount;
-		if (ret <= 0) {
-			delete this;
-			ret = 0;
-		}
-		return ret;
-	}
-
-	// ISequentialStream
-	HRESULT STDMETHODCALLTYPE Read(void *pv, ULONG cb, ULONG *pcbRead) {
-		return unzip->read(pv, cb, pcbRead);
-	}
-
-	HRESULT STDMETHODCALLTYPE Write(const void *pv, ULONG cb, ULONG *pcbWritten) {
-		return E_NOTIMPL;
-	}
-
-	// IStream
-	HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER dlibMove,	DWORD dwOrigin, ULARGE_INTEGER *plibNewPosition) {
+	/* if error, position is not changed */
+	virtual tjs_uint64 TJS_INTF_METHOD Seek(tjs_int64 offset, tjs_int whence) {
 		// 先頭にだけ戻せる
 		ZPOS64_T cur;
-		switch (dwOrigin) {
-		case STREAM_SEEK_CUR:
+		switch (whence) {
+		case TJS_BS_SEEK_CUR:
 			cur = unzip->tell();
-			cur += dlibMove.QuadPart;
+			cur += offset;
 			break;
-		case STREAM_SEEK_SET:
-			cur = dlibMove.QuadPart;
+		default:
+		case TJS_BS_SEEK_SET:
+			cur = offset;
 			break;
-		case STREAM_SEEK_END:
+		case TJS_BS_SEEK_END:
 			cur = this->size;
-			cur += dlibMove.QuadPart;
+			cur += offset;
 			break;
 		}
-		unzip->seek(cur);
-		if (plibNewPosition) {
-			plibNewPosition->QuadPart = cur;
+		if (unzip->seek(cur) == S_OK) {
+			return cur;
 		}
-		return S_OK;
-	}
-	
-	HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER libNewSize) {
-		return E_NOTIMPL;
-	}
-	
-	HRESULT STDMETHODCALLTYPE CopyTo(IStream *pstm, ULARGE_INTEGER cb, ULARGE_INTEGER *pcbRead, ULARGE_INTEGER *pcbWritten) {
-		return E_NOTIMPL;
+		return EOF;
 	}
 
-	HRESULT STDMETHODCALLTYPE Commit(DWORD grfCommitFlags) {
-		return E_NOTIMPL;
-	}
-
-	HRESULT STDMETHODCALLTYPE Revert(void) {
-		return E_NOTIMPL;
-	}
-
-	HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType) {
-		return E_NOTIMPL;
-	}
-	
-	HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType) {
-		return E_NOTIMPL;
-	}
-	
-	HRESULT STDMETHODCALLTYPE Stat(STATSTG *pstatstg, DWORD grfStatFlag) {
-		if(pstatstg) {
-			ZeroMemory(pstatstg, sizeof(*pstatstg));
-
-			// pwcsName
-			// this object's storage pointer does not have a name ...
-			if(!(grfStatFlag &  STATFLAG_NONAME)) {
-				// anyway returns an empty string
-				LPWSTR str = (LPWSTR)CoTaskMemAlloc(sizeof(*str));
-				if(str == NULL) return E_OUTOFMEMORY;
-				*str = L'\0';
-				pstatstg->pwcsName = str;
-			}
-
-			// type
-			pstatstg->type = STGTY_STREAM;
-			
-			// cbSize
-			pstatstg->cbSize.QuadPart = size;
-			
-			// mtime, ctime, atime unknown
-
-			// grfMode unknown
-			pstatstg->grfMode = STGM_DIRECT | STGM_READ | STGM_SHARE_DENY_WRITE ;
-			
-			// grfLockSuppoted
-			pstatstg->grfLocksSupported = 0;
-			
-			// grfStatBits unknown
-		} else {
-			return E_INVALIDARG;
+	virtual tjs_uint TJS_INTF_METHOD Read(void *buffer, tjs_uint read_size) {
+		ULONG pcbRead;
+		if (unzip->read(buffer, read_size, &pcbRead) == S_OK) {
+			return pcbRead;
 		}
-		return S_OK;
+		return 0;
 	}
 
-	HRESULT STDMETHODCALLTYPE Clone(IStream **ppstm) {
-		return E_NOTIMPL;
+	virtual tjs_uint TJS_INTF_METHOD Write(const void *buffer, tjs_uint write_size) {
+		return 0;
+	};
+
+	virtual void TJS_INTF_METHOD SetEndOfStorage() {
+	}
+
+	virtual tjs_uint64 TJS_INTF_METHOD GetSize() {;
+		return size;
 	}
 
 	bool init(const ttstr filename) {
-		bool ret = false;
-		if ((ret = unzip->open(filename, &size))) {
-			this->filename = filename;
-		}
-		return ret;
+		return unzip->open(filename, &size);
 	}
 	
 protected:
@@ -379,10 +291,7 @@ protected:
 		unzip->close();
 	}
 	
-	
 private:
-	int refCount;
-	ttstr filename;
 	UnzipBase *unzip;
 	ULONG size;
 };
@@ -457,7 +366,7 @@ public:
 	// open a storage and return a tTJSBinaryStream instance.
 	// name does not contain in-archive storage name but
 	// is normalized.
-	virtual tTJSBinaryStream * TJS_INTF_METHOD Open(const ttstr & name, tjs_uint32 flags) {
+	virtual iTJSBinaryStream * TJS_INTF_METHOD Open(const ttstr & name, tjs_uint32 flags) {
 		if (flags == TJS_BS_READ) { // 読み込みのみ
 			ttstr fname;
 			UnzipBase *unzip = getUnzip(name, fname);
@@ -465,11 +374,10 @@ public:
 				UnzipStream *stream = new UnzipStream(unzip);
 				if (stream) {
 					if (stream->init(fname)) {
-						tTJSBinaryStream *ret = TVPCreateBinaryStreamAdapter(stream);
-						stream->Release();
-						return ret;
+						return stream;
 					}
-					stream->Release();
+					stream->Destruct();
+					stream = 0;
 				}
 			}
 		}
