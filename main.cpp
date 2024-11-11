@@ -294,7 +294,7 @@ public:
 
 		bool ret;
 		
-		iTJSBinaryStream *in = TVPCreateStream(filename, TJS_BS_READ);
+		IStream *in = TVPCreateIStream(filename, TJS_BS_READ);
 		if (in) {
 			
 			// CRC計算
@@ -302,11 +302,13 @@ public:
 			if (usePassword) {
 				char buf[BUFFERSIZE];
 				DWORD size;
-				while ((size = in->Read(buf, sizeof buf)) > 0) {
+				while (in->Read(buf, sizeof buf, &size) == S_OK && size > 0) {
 					crcFile = crc32(crcFile, (const unsigned char *)buf, size);
 				}
 				// 位置をもどす
-				in->Seek(0, TJS_BS_SEEK_CUR);
+				LARGE_INTEGER move = {0};
+				ULARGE_INTEGER newposition;
+				in->Seek(move, STREAM_SEEK_CUR, &newposition);
 			}
 			// ファイルの追加
 			// UTF8で格納する
@@ -319,7 +321,7 @@ public:
 									 crcFile, 0, FLAG_UTF8) == ZIP_OK) {
 				char buf[BUFFERSIZE];
 				DWORD size;
-				while ((size = in->Read(buf, sizeof buf)) > 0) {
+				while (in->Read(buf, sizeof buf, &size) == S_OK && size > 0) {
 					zipWriteInFileInZip (self->zf, buf, size);
 				}
 				zipCloseFileInZip(self->zf);
@@ -327,7 +329,7 @@ public:
 			} else {
 				ret = false;
 			}
-			in->Destruct();
+			in->Release();
 			in = 0;
 		}
 
@@ -520,14 +522,14 @@ public:
 			int result = usePassword ? unzOpenCurrentFilePassword(self->uf,NarrowString(password))
 				: unzOpenCurrentFile(self->uf);
 			if (result == UNZ_OK) {
-				iTJSBinaryStream *out = TVPCreateStream(destname, TJS_BS_WRITE);
+				IStream *out = TVPCreateIStream(destname, TJS_BS_WRITE);
 				if (out) {
 					char buf[BUFFERSIZE];
 					DWORD size;
 					while ((size = unzReadCurrentFile(self->uf,buf,sizeof buf)) > 0) {
-						out->Write(buf, size);
+						out->Write(buf, size, &size);
 					}
-					out->Destruct();
+					out->Release();
 					out = 0;
 				} else {
 					unzCloseCurrentFile(self->uf);
