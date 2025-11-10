@@ -12,7 +12,7 @@
 
 #define CASESENSITIVITY (0)
 
-#define BASENAME L"zip"
+#define BASENAME TJS_W("zip")
 
 // UTF8なファイル名かどうかのフラグ
 #define FLAG_UTF8 (1<<11)
@@ -451,7 +451,7 @@ protected:
 		ttstr dname;
 		const tjs_char *p = name.c_str();
 		const tjs_char *q;
-		if ((q = wcschr(p, '/'))) {
+		if ((q = TJS_strchr(p, '/'))) {
 			dname = ttstr(p, q-p);
 			fname = ttstr(q+1);
 		} else {
