@@ -522,14 +522,14 @@ public:
 			int result = usePassword ? unzOpenCurrentFilePassword(self->uf,NarrowString(password))
 				: unzOpenCurrentFile(self->uf);
 			if (result == UNZ_OK) {
-				IStream *out = TVPCreateIStream(destname, TJS_BS_WRITE);
+				iTJSBinaryStream *out = TVPCreateStream(destname, TJS_BS_WRITE);
 				if (out) {
 					char buf[BUFFERSIZE];
-					DWORD size;
+					tjs_uint size;
 					while ((size = unzReadCurrentFile(self->uf,buf,sizeof buf)) > 0) {
-						out->Write(buf, size, &size);
+						out->Write(buf, size);
 					}
-					out->Release();
+					out->Destruct();
 					out = 0;
 				} else {
 					unzCloseCurrentFile(self->uf);
