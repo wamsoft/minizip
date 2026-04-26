@@ -1,113 +1,200 @@
+// iTJSBinaryStream を minizip-ng の mz_stream としてラップする実装
+
 #include <stdio.h>
-#include <windows.h>
+#include <stdlib.h>
+#include <string.h>
 #include "tp_stub.h"
-#include "mz_compat.h"
 
-static void* ZCALLBACK fopen64_file_func (void* opaque, const void* filename, int mode)
-{
-	IStream *file = NULL;
-	int tjsmode = 0;
-	if ((mode & ZLIB_FILEFUNC_MODE_READWRITEFILTER)==ZLIB_FILEFUNC_MODE_READ)
-		tjsmode = TJS_BS_READ;
-    else
-    if (mode & ZLIB_FILEFUNC_MODE_EXISTING)
-		tjsmode= TJS_BS_APPEND;
-	else
-    if (mode & ZLIB_FILEFUNC_MODE_CREATE)
-		tjsmode = TJS_BS_WRITE;
-	
-	if ((filename!=NULL)) {
-		file = TVPCreateIStream(ttstr((const tjs_char*)filename), tjsmode);
-	}
-  return file;
+extern "C" {
+#include "mz.h"
+#include "mz_strm.h"
 }
 
+#include "ioapi.h"
 
-static unsigned long ZCALLBACK fread_file_func (void* opaque, void* stream, void* buf, unsigned long size)
+typedef struct mz_stream_tvp_s {
+	mz_stream stream;
+	iTJSBinaryStream *bs;
+	int owned;
+	int32_t error;
+} mz_stream_tvp;
+
+static int32_t mz_stream_tvp_open(void *stream, const char *path, int32_t mode)
 {
-	IStream *is = (IStream*)stream;
-	if (is) {
-		DWORD s;
-		if (is->Read(buf,size,&s) == S_OK) {
-			return s;
-		}
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (t->bs && t->owned) {
+		t->bs->Destruct();
 	}
-	return 0;
+	t->bs = NULL;
+	t->error = MZ_OK;
+	if (!path) return MZ_PARAM_ERROR;
+
+	int flags;
+	if (mode & MZ_OPEN_MODE_CREATE) {
+		flags = TJS_BS_WRITE;
+	} else if (mode & MZ_OPEN_MODE_APPEND) {
+		flags = TJS_BS_APPEND;
+	} else if (mode & MZ_OPEN_MODE_WRITE) {
+		flags = TJS_BS_WRITE;
+	} else {
+		flags = TJS_BS_READ;
+	}
+
+	// path は UTF-8 narrow なので wide に変換してから ttstr を作る
+	ttstr filename;
+	int wlen = TVPUtf8ToWideCharString(path, NULL);
+	if (wlen <= 0) {
+		filename = path; // フォールバック (ANSI 解釈)
+	} else {
+		tjs_char *wbuf = new tjs_char[wlen + 1];
+		TVPUtf8ToWideCharString(path, wbuf);
+		wbuf[wlen] = 0;
+		filename = wbuf;
+		delete[] wbuf;
+	}
+
+	try {
+		t->bs = TVPCreateStream(filename, flags);
+	} catch(...) {
+		t->bs = NULL;
+	}
+	if (!t->bs) {
+		t->error = MZ_OPEN_ERROR;
+		return MZ_OPEN_ERROR;
+	}
+	t->owned = 1;
+	return MZ_OK;
 }
 
-static unsigned long ZCALLBACK fwrite_file_func (void* opaque, void* stream, const void* buf, unsigned long size)
+static int32_t mz_stream_tvp_is_open(void *stream)
 {
-	IStream *is = (IStream*)stream;
-	if (is) {
-		DWORD s;
-		if (is->Write(buf,size,&s) == S_OK) {
-			return s;
-		}
-	}
-	return 0;
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	return t->bs ? MZ_OK : MZ_OPEN_ERROR;
 }
 
-static ZPOS64_T ZCALLBACK ftell64_file_func (void* opaque, void* stream)
+static int32_t mz_stream_tvp_read(void *stream, void *buf, int32_t size)
 {
-	IStream *is = (IStream *)stream;
-	if (is) {
-		LARGE_INTEGER move = {0};
-		ULARGE_INTEGER newposition;
-		if (is->Seek(move, STREAM_SEEK_CUR, &newposition) == S_OK) {
-			return newposition.QuadPart;
-		}
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (!t->bs) return MZ_OPEN_ERROR;
+	try {
+		return (int32_t)t->bs->Read(buf, (tjs_uint)size);
+	} catch(...) {
+		t->error = MZ_READ_ERROR;
+		return MZ_READ_ERROR;
 	}
-	return -1;
 }
 
-static long ZCALLBACK fseek64_file_func (void*  opaque, void* stream, ZPOS64_T offset, int origin)
+static int32_t mz_stream_tvp_write(void *stream, const void *buf, int32_t size)
 {
-	tjs_int dwOrigin;
-	switch(origin) {
-	case ZLIB_FILEFUNC_SEEK_CUR: dwOrigin = TJS_BS_SEEK_CUR; break;
-	case ZLIB_FILEFUNC_SEEK_END: dwOrigin = TJS_BS_SEEK_END; break;
-	case ZLIB_FILEFUNC_SEEK_SET: dwOrigin = TJS_BS_SEEK_SET; break;
-	default: return -1; //failed
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (!t->bs) return MZ_OPEN_ERROR;
+	try {
+		return (int32_t)t->bs->Write(buf, (tjs_uint)size);
+	} catch(...) {
+		t->error = MZ_WRITE_ERROR;
+		return MZ_WRITE_ERROR;
 	}
-	IStream *is = (IStream *)stream;
-	if (is) {
-		LARGE_INTEGER move;
-		move.QuadPart = offset;
-		ULARGE_INTEGER newposition;
-		if (is->Seek(move, origin, &newposition) == S_OK) {
-			return 0;
-		}
-	}
-	return -1;
 }
 
-
-static int ZCALLBACK fclose_file_func (void* opaque, void* stream)
+static int64_t mz_stream_tvp_tell(void *stream)
 {
-	IStream *is = (IStream *)stream;
-	if (is) {
-		is->Release();
-		return 0;
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (!t->bs) return MZ_OPEN_ERROR;
+	try {
+		return (int64_t)t->bs->GetPosition();
+	} catch(...) {
+		t->error = MZ_TELL_ERROR;
+		return MZ_TELL_ERROR;
 	}
-	return EOF;
 }
 
-static int ZCALLBACK ferror_file_func (void* opaque, void* stream)
+static int32_t mz_stream_tvp_seek(void *stream, int64_t offset, int32_t origin)
 {
-	IStream *is = (IStream *)stream;
-	if (is) {
-		return 0;
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (!t->bs) return MZ_OPEN_ERROR;
+	tjs_int whence;
+	switch (origin) {
+	case MZ_SEEK_CUR: whence = TJS_BS_SEEK_CUR; break;
+	case MZ_SEEK_END: whence = TJS_BS_SEEK_END; break;
+	case MZ_SEEK_SET:
+	default:          whence = TJS_BS_SEEK_SET; break;
 	}
-	return EOF;
+	try {
+		t->bs->Seek((tjs_int64)offset, whence);
+		return MZ_OK;
+	} catch(...) {
+		t->error = MZ_SEEK_ERROR;
+		return MZ_SEEK_ERROR;
+	}
 }
 
-zlib_filefunc64_def TVPZlibFileFunc = {
-	fopen64_file_func,
-	fread_file_func,
-	fwrite_file_func,
-	ftell64_file_func,
-	fseek64_file_func,
-	fclose_file_func,
-	ferror_file_func,
-	NULL
+static int32_t mz_stream_tvp_close(void *stream)
+{
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (t->bs && t->owned) {
+		t->bs->Destruct();
+	}
+	t->bs = NULL;
+	return MZ_OK;
+}
+
+static int32_t mz_stream_tvp_error(void *stream)
+{
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	return t->error;
+}
+
+static mz_stream_vtbl mz_stream_tvp_vtbl = {
+	mz_stream_tvp_open,
+	mz_stream_tvp_is_open,
+	mz_stream_tvp_read,
+	mz_stream_tvp_write,
+	mz_stream_tvp_tell,
+	mz_stream_tvp_seek,
+	mz_stream_tvp_close,
+	mz_stream_tvp_error,
+	NULL, // create
+	NULL, // destroy
+	NULL, // get_prop_int64
+	NULL  // set_prop_int64
 };
+
+void *mz_stream_tvp_create(void)
+{
+	mz_stream_tvp *t = (mz_stream_tvp*)calloc(1, sizeof(*t));
+	if (t) {
+		t->stream.vtbl = &mz_stream_tvp_vtbl;
+	}
+	return t;
+}
+
+void mz_stream_tvp_delete(void **stream)
+{
+	if (!stream || !*stream) return;
+	mz_stream_tvp *t = (mz_stream_tvp*)*stream;
+	if (t->bs && t->owned) {
+		t->bs->Destruct();
+	}
+	free(t);
+	*stream = NULL;
+}
+
+void mz_stream_tvp_attach(void *stream, iTJSBinaryStream *bs, int owned)
+{
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	if (t->bs && t->owned) {
+		t->bs->Destruct();
+	}
+	t->bs = bs;
+	t->owned = owned;
+	t->error = MZ_OK;
+}
+
+iTJSBinaryStream *mz_stream_tvp_detach(void *stream)
+{
+	mz_stream_tvp *t = (mz_stream_tvp*)stream;
+	iTJSBinaryStream *bs = t->bs;
+	t->bs = NULL;
+	t->owned = 0;
+	return bs;
+}

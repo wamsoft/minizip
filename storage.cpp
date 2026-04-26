@@ -1,34 +1,43 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ncbind.hpp>
 #include <map>
 #include <vector>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include "mz_compat.h"
+extern "C" {
+#include "mz.h"
+#include "mz_strm.h"
+#include "mz_zip.h"
+#include "mz_zip_rw.h"
+}
 
+#include "ioapi.h"
 #include "narrow.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #define CASESENSITIVITY (0)
 
 #define BASENAME TJS_W("zip")
 
-// UTF8なファイル名かどうかのフラグ
-#define FLAG_UTF8 (1<<11)
 extern void storeFilename(ttstr &name, const char *narrowName, bool utf8);
-
-// ファイルアクセス用
-extern zlib_filefunc64_def TVPZlibFileFunc;
 
 /**
  * Zip 展開処理クラス
+ *
+ * mz_zip_reader はエントリ単位での順次読み込みのみ対応しているため、
+ * lock/unlock で 1 つの reader を直列化して使う。
  */
 class UnzipBase {
 
 public:
-	UnzipBase() : refCount(1), uf(NULL), utf8(false) {
+	UnzipBase() : refCount(1), zr(NULL), zrstream(NULL), zipfile(), utf8(false), entryOpen(false) {
+#ifdef _WIN32
 		::InitializeCriticalSection(&cs);
+#endif
 	}
 
 	void AddRef() {
@@ -42,54 +51,83 @@ public:
 			refCount--;
 		}
 	};
-	
+
 	/**
 	 * ZIPファイルを開く
 	 * @param filename ファイル名
 	 */
 	bool init(const ttstr &filename) {
 		done();
-		if ((uf = unzOpen2_64((const void*)filename.c_str(), &TVPZlibFileFunc)) != NULL) {
-			lock();
-			unzGoToFirstFile(uf);
-			unz_file_info file_info;
-			// UTF8判定
-			if (unzGetCurrentFileInfo(uf, &file_info,NULL,0,NULL,0,NULL,0) == UNZ_OK) {
-				utf8 = (file_info.flag & FLAG_UTF8) != 0;
-			}
-			do {
-				char filename_inzip[1024];
-				unz_file_info file_info;
-				if (unzGetCurrentFileInfo(uf, &file_info, filename_inzip, sizeof(filename_inzip),NULL,0,NULL,0) == UNZ_OK) {
-					ttstr filename;
-					storeFilename(filename, filename_inzip, utf8);
-					entryName(filename);
+		zipfile = filename;
+
+		if (!openReader()) return false;
+
+		// UTF8 判定 + ディレクトリエントリ収集
+		lock();
+		int err = mz_zip_reader_goto_first_entry(zr);
+		bool first = true;
+		while (err == MZ_OK) {
+			mz_zip_file *file_info = NULL;
+			if (mz_zip_reader_entry_get_info(zr, &file_info) == MZ_OK && file_info) {
+				if (first) {
+					utf8 = (file_info->flag & MZ_ZIP_FLAG_UTF8) != 0;
+					first = false;
 				}
-			} while (unzGoToNextFile(uf) == UNZ_OK);
-			unlock();
-			return true;
+				ttstr name;
+				storeFilename(name, file_info->filename ? file_info->filename : "", utf8);
+				entryName(name);
+			}
+			err = mz_zip_reader_goto_next_entry(zr);
 		}
-		return false;
+		unlock();
+		return true;
 	}
 
 	/**
 	 * 個別の展開用ファイルを開く
 	 */
-	bool open(const ttstr &srcname, ULONG *size) {
-		if (uf) {
-			lock();
-			if (unzLocateFile(uf, NarrowString(srcname, utf8), CASESENSITIVITY) == UNZ_OK) {
-				if (size) {
-					unz_file_info file_info;
-					if (unzGetCurrentFileInfo(uf, &file_info, NULL,0,NULL,0,NULL,0) == UNZ_OK) {
-						*size = file_info.uncompressed_size;
-					}
-				}
-				if (unzOpenCurrentFile(uf) == UNZ_OK) {
-					return true;
-				}
+	bool open(const ttstr &srcname, tjs_uint64 *size) {
+		if (!zr) return false;
+		lock();
+		closeEntry();
+		NarrowString nname(srcname, utf8);
+		if (mz_zip_reader_locate_entry(zr, (const char*)nname, CASESENSITIVITY ? 0 : 1) == MZ_OK) {
+			mz_zip_file *file_info = NULL;
+			if (size && mz_zip_reader_entry_get_info(zr, &file_info) == MZ_OK && file_info) {
+				*size = (tjs_uint64)file_info->uncompressed_size;
 			}
-			unlock();
+			if (mz_zip_reader_entry_open(zr) == MZ_OK) {
+				entryOpen = true;
+				return true; // unlock は close() 側で行う
+			}
+		}
+		unlock();
+		return false;
+	}
+
+	/**
+	 * 個別の展開用ファイルを最初から開きなおす
+	 */
+	bool reopenLocked(const ttstr &srcname) {
+		// すでに lock 済みでエントリ open 中の状態から呼ばれる
+		closeEntry();
+		// reader を作り直したほうが安全 (一度 entry を読み始めたあと
+		// その entry の先頭まで巻き戻す API がないため)
+		if (zr) {
+			mz_zip_reader_close(zr);
+			mz_zip_reader_delete(&zr);
+		}
+		if (zrstream) {
+			mz_stream_close(zrstream);
+			mz_stream_tvp_delete(&zrstream);
+		}
+		if (!openReader()) return false;
+		NarrowString nname(srcname, utf8);
+		if (mz_zip_reader_locate_entry(zr, (const char*)nname, CASESENSITIVITY ? 0 : 1) == MZ_OK) {
+			if (mz_zip_reader_entry_open(zr) == MZ_OK) {
+				entryOpen = true;
+				return true;
+			}
 		}
 		return false;
 	}
@@ -97,65 +135,28 @@ public:
 	/**
 	 * 個別の展開用ファイルからデータを読み込む
 	 */
-	HRESULT read(void *pv, ULONG cb, ULONG *pcbRead) {
-		if (uf) {
-			lock();
-			DWORD size = unzReadCurrentFile(uf, pv,cb);
-			if (pcbRead) {
-				*pcbRead = size;
-			}
-			unlock();
-			return size < cb ? S_FALSE : S_OK;
-		}
-		return STG_E_ACCESSDENIED;
+	tjs_uint read(void *pv, tjs_uint cb) {
+		if (!zr || !entryOpen) return 0;
+		int32_t r = mz_zip_reader_entry_read(zr, pv, (int32_t)cb);
+		return r > 0 ? (tjs_uint)r : 0;
 	}
 
-	HRESULT seek(ZPOS64_T pos) {
-		if (uf) {
-			HRESULT ret;
-			lock();
-			ret = unzSetOffset64(uf, pos) == UNZ_OK ? S_OK : S_FALSE;
-			unlock();
-			return ret;
-		}
-		return STG_E_ACCESSDENIED;
-	}
-	
-	ZPOS64_T tell() {
-		ZPOS64_T ret = 0;
-		if (uf) {
-			lock();
-			ret = unzTell64(uf);
-			unlock();
-		}
-		return ret;
-	}
-
-	/**
-	 * 個別の展開用ファイルを閉じる
-	 */
-	void close() {
-		if (uf) {
-			lock();
-			unzCloseCurrentFile(uf);
-			unlock();
-		}
-	}
-	
 	bool CheckExistentStorage(const ttstr &name) {
-		bool ret = true;
-		if (uf) {
+		bool ret = false;
+		if (zr) {
 			lock();
-			ret = unzLocateFile(uf, NarrowString(name, utf8), CASESENSITIVITY) == UNZ_OK;
+			closeEntry();
+			NarrowString nname(name, utf8);
+			ret = mz_zip_reader_locate_entry(zr, (const char*)nname, CASESENSITIVITY ? 0 : 1) == MZ_OK;
 			unlock();
 		}
 		return ret;
 	}
-	
+
 	void GetListAt(const ttstr &name, iTVPStorageLister *lister) {
 		ttstr fname = "/";
 		fname += name;
-		std::map<ttstr,FileNameList>::const_iterator it = dirEntryTable.find(fname);
+		std::map<ttstr, FileNameList>::const_iterator it = dirEntryTable.find(fname);
 		if (it != dirEntryTable.end()) {
 			std::vector<ttstr>::const_iterator fit = it->second.begin();
 			while (fit != it->second.end()) {
@@ -165,31 +166,78 @@ public:
 		}
 	}
 
-protected:
-
 	/**
-	 * デストラクタ
+	 * 個別の展開用ファイルを閉じる
 	 */
-	virtual ~UnzipBase() {
-		done();
-		::DeleteCriticalSection(&cs);
-	}
-
-	void done() {
-		if (uf) {
-			unzClose(uf);
-			uf = NULL;
+	void close() {
+		if (zr) {
+			closeEntry();
+			unlock();
 		}
 	}
 
-	// ロック
-	void lock() {
-		::EnterCriticalSection(&cs);
+	bool isUtf8() const { return utf8; }
+
+protected:
+
+	virtual ~UnzipBase() {
+		done();
+#ifdef _WIN32
+		::DeleteCriticalSection(&cs);
+#endif
 	}
 
-	// ロック解除
+	bool openReader() {
+		iTJSBinaryStream *bs = NULL;
+		try {
+			bs = TVPCreateStream(zipfile, TJS_BS_READ);
+		} catch(...) {
+			bs = NULL;
+		}
+		if (!bs) return false;
+
+		zrstream = mz_stream_tvp_create();
+		mz_stream_tvp_attach(zrstream, bs, 1);
+
+		zr = mz_zip_reader_create();
+		if (mz_zip_reader_open(zr, zrstream) != MZ_OK) {
+			mz_zip_reader_delete(&zr);
+			mz_stream_tvp_delete(&zrstream);
+			return false;
+		}
+		return true;
+	}
+
+	void done() {
+		if (zr) {
+			mz_zip_reader_close(zr);
+			mz_zip_reader_delete(&zr);
+			zr = NULL;
+		}
+		if (zrstream) {
+			mz_stream_close(zrstream);
+			mz_stream_tvp_delete(&zrstream);
+			zrstream = NULL;
+		}
+	}
+
+	void closeEntry() {
+		if (zr && entryOpen) {
+			mz_zip_reader_entry_close(zr);
+			entryOpen = false;
+		}
+	}
+
+	void lock() {
+#ifdef _WIN32
+		::EnterCriticalSection(&cs);
+#endif
+	}
+
 	void unlock() {
+#ifdef _WIN32
 		::LeaveCriticalSection(&cs);
+#endif
 	}
 
 	void entryName(const ttstr &name) {
@@ -197,7 +245,7 @@ protected:
 		ttstr fname;
 		const tjs_char *p = name.c_str();
 		const tjs_char *q;
-		if ((q = wcsrchr(p, '/'))) {
+		if ((q = TJS_strrchr(p, '/'))) {
 			dname += ttstr(p, q-p+1);
 			fname = ttstr(q+1);
 		} else {
@@ -205,17 +253,24 @@ protected:
 		}
 		dirEntryTable[dname].push_back(fname);
 	}
-	
+
 private:
 	int refCount;
-	// zipファイル情報
-	unzFile uf;
+	void *zr;
+	void *zrstream;
+	ttstr zipfile;
 	bool utf8;
+	bool entryOpen;
+#ifdef _WIN32
 	CRITICAL_SECTION cs;
+#endif
 
-	// ディレクトリ別ファイル名エントリ情報
 	typedef std::vector<ttstr> FileNameList;
-	std::map<ttstr,FileNameList> dirEntryTable;
+	std::map<ttstr, FileNameList> dirEntryTable;
+
+	// 読み出しのために UnzipStream に開放してもらう
+public:
+	void unlockAfterRead() { unlock(); }
 };
 
 /**
@@ -224,43 +279,47 @@ private:
 class UnzipStream : public iTJSBinaryStream {
 
 public:
-	/**
-	 * コンストラクタ
-	 */
-	UnzipStream(UnzipBase *unzip) : unzip(unzip), size(0) {
+	UnzipStream(UnzipBase *unzip) : unzip(unzip), filename(), size(0), position(0) {
 		unzip->AddRef();
 	};
 
-	/* if error, position is not changed */
 	virtual tjs_uint64 TJS_INTF_METHOD Seek(tjs_int64 offset, tjs_int whence) {
-		// 先頭にだけ戻せる
-		ZPOS64_T cur;
+		tjs_int64 newpos;
 		switch (whence) {
-		case TJS_BS_SEEK_CUR:
-			cur = unzip->tell();
-			cur += offset;
-			break;
-		default:
+		case TJS_BS_SEEK_CUR: newpos = (tjs_int64)position + offset; break;
+		case TJS_BS_SEEK_END: newpos = (tjs_int64)size + offset; break;
 		case TJS_BS_SEEK_SET:
-			cur = offset;
-			break;
-		case TJS_BS_SEEK_END:
-			cur = this->size;
-			cur += offset;
-			break;
+		default:              newpos = offset; break;
 		}
-		if (unzip->seek(cur) == S_OK) {
-			return cur;
+		if (newpos < 0) newpos = 0;
+		if ((tjs_uint64)newpos > size) newpos = (tjs_int64)size;
+
+		// 後方シーク → エントリを開きなおして先頭に戻す
+		if ((tjs_uint64)newpos < position) {
+			if (!unzip->reopenLocked(filename)) {
+				return position;
+			}
+			position = 0;
 		}
-		return EOF;
+
+		// 前方スキップ
+		char dummy[4096];
+		while (position < (tjs_uint64)newpos) {
+			tjs_uint to_read = sizeof dummy;
+			if ((tjs_uint64)newpos - position < to_read) {
+				to_read = (tjs_uint)((tjs_uint64)newpos - position);
+			}
+			tjs_uint r = unzip->read(dummy, to_read);
+			if (r == 0) break;
+			position += r;
+		}
+		return position;
 	}
 
 	virtual tjs_uint TJS_INTF_METHOD Read(void *buffer, tjs_uint read_size) {
-		ULONG pcbRead;
-		if (unzip->read(buffer, read_size, &pcbRead) == S_OK) {
-			return pcbRead;
-		}
-		return 0;
+		tjs_uint r = unzip->read(buffer, read_size);
+		position += r;
+		return r;
 	}
 
 	virtual tjs_uint TJS_INTF_METHOD Write(const void *buffer, tjs_uint write_size) {
@@ -270,30 +329,26 @@ public:
 	virtual void TJS_INTF_METHOD SetEndOfStorage() {
 	}
 
-	virtual tjs_uint64 TJS_INTF_METHOD GetSize() {;
+	virtual tjs_uint64 TJS_INTF_METHOD GetSize() {
 		return size;
 	}
 
-	bool init(const ttstr filename) {
+	bool init(const ttstr &filename) {
+		this->filename = filename;
 		return unzip->open(filename, &size);
 	}
-	
+
 protected:
-	/**
-	 * デストラクタ
-	 */
 	virtual ~UnzipStream() {
-		close();
+		unzip->close();
 		unzip->Release();
 	}
 
-	void close() {
-		unzip->close();
-	}
-	
 private:
 	UnzipBase *unzip;
-	ULONG size;
+	ttstr filename;
+	tjs_uint64 size;
+	tjs_uint64 position;
 };
 
 /**
@@ -303,17 +358,10 @@ class ZipStorage : public iTVPStorageMedia
 {
 
 public:
-	/**
-	 * コンストラクタ
-	 */
 	ZipStorage() : refCount(1) {
 	}
 
-	/**
-	 * デストラクタ
-	 */
 	virtual ~ZipStorage() {
-		// 全情報を破棄
 		std::map<ttstr, UnzipBase*>::iterator it = unzipTable.begin();
 		while (it != unzipTable.end()) {
 			it->second->Release();
@@ -323,7 +371,7 @@ public:
 
 public:
 	// -----------------------------------
-	// iTVPStorageMedia Intefaces
+	// iTVPStorageMedia Interfaces
 	// -----------------------------------
 
 	virtual void TJS_INTF_METHOD AddRef() {
@@ -338,36 +386,24 @@ public:
 		}
 	};
 
-	// returns media name like "file", "http" etc.
 	virtual void TJS_INTF_METHOD GetName(ttstr &name) {
 		name = BASENAME;
 	}
 
-	//	virtual ttstr TJS_INTF_METHOD IsCaseSensitive() = 0;
-	// returns whether this media is case sensitive or not
-
-	// normalize domain name according with the media's rule
 	virtual void TJS_INTF_METHOD NormalizeDomainName(ttstr &name) {
-		// nothing to do
 	}
 
-	// normalize path name according with the media's rule
 	virtual void TJS_INTF_METHOD NormalizePathName(ttstr &name) {
-		// nothing to do
 	}
 
-	// check file existence
 	virtual bool TJS_INTF_METHOD CheckExistentStorage(const ttstr &name) {
 		ttstr fname;
 		UnzipBase *unzip = getUnzip(name, fname);
 		return unzip ? unzip->CheckExistentStorage(fname) : false;
 	}
 
-	// open a storage and return a tTJSBinaryStream instance.
-	// name does not contain in-archive storage name but
-	// is normalized.
 	virtual iTJSBinaryStream * TJS_INTF_METHOD Open(const ttstr & name, tjs_uint32 flags) {
-		if (flags == TJS_BS_READ) { // 読み込みのみ
+		if (flags == TJS_BS_READ) {
 			ttstr fname;
 			UnzipBase *unzip = getUnzip(name, fname);
 			if (unzip) {
@@ -385,7 +421,6 @@ public:
 		return NULL;
 	}
 
-	// list files at given place
 	virtual void TJS_INTF_METHOD GetListAt(const ttstr &name, iTVPStorageLister * lister) {
 		ttstr fname;
 		UnzipBase *unzip = getUnzip(name, fname);
@@ -394,9 +429,6 @@ public:
 		}
 	}
 
-	// basically the same as above,
-	// check wether given name is easily accessible from local OS filesystem.
-	// if true, returns local OS native name. otherwise returns an empty string.
 	virtual void TJS_INTF_METHOD GetLocallyAccessibleName(ttstr &name) {
 		name = "";
 	}
@@ -441,12 +473,6 @@ public:
 
 protected:
 
-	/*
-	 * ドメインに合致した Unzip 情報を取得
-	 * @param name ファイル名
-	 * @param fname ファイル名を返す
-	 * @return Unzip情報
-	 */
 	UnzipBase *getUnzip(const ttstr &name, ttstr &fname) {
 		ttstr dname;
 		const tjs_char *p = name.c_str();
@@ -463,10 +489,10 @@ protected:
 		}
 		return NULL;
 	}
-	
+
 private:
-	tjs_uint refCount; //< リファレンスカウント
-	std::map<ttstr, UnzipBase*> unzipTable; //< zip情報
+	tjs_uint refCount;
+	std::map<ttstr, UnzipBase*> unzipTable;
 };
 
 
@@ -476,7 +502,7 @@ private:
 class StoragesZip {
 
 public:
-	
+
 	static void init() {
 		if (zip == NULL) {
 			zip = new ZipStorage();
@@ -492,13 +518,6 @@ public:
 		}
 	}
 
-	/**
-	 * zipファイルをファイルシステムとして mount します
-	 * zip://ドメイン名/ファイル名 でアクセス可能になります。読み込み専用になります。
-	 * @param name ドメイン名
-	 * @param zipfile マウントするZIPファイル名
-	 * @return マウントに成功したら true
-	 */
 	static bool mountZip(const tjs_char *name, const tjs_char *zipfile) {
 		if (zip) {
 			return zip->mount(ttstr(name), ttstr(zipfile));
@@ -506,11 +525,6 @@ public:
 		return false;
 	}
 
-	/**
-	 * zipファイルを unmount します
-	 * @param name ドメイン名
-	 * @return アンマウントに成功したら true
-	 */
 	static bool unmountZip(const tjs_char *name) {
 		if (zip) {
 			return zip->unmount(ttstr(name));

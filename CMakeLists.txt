@@ -15,13 +15,4 @@ krkrz_plugin(minizip
         storage.cpp
     LIBRARIES
         MINIZIP::minizip-ng
-        # libminizip
-)
-
-target_compile_definitions(${PROJECT_NAME} PUBLIC
-	MZ_COMPAT_VERSION=100
-)
-
-target_include_directories(${PROJECT_NAME} PUBLIC
-    minizip
 )
