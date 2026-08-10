@@ -576,6 +576,11 @@ static void PostUnregistCallback()
 }
 
 NCB_PRE_REGIST_CALLBACK(PreRegistCallback);
+// 同梱コンポーネントのライセンスを本体収集機構へ登録
+// (LicensesGen.cpp = licenses/manifest.json から生成)
+extern void RegisterMinizipLicenses();
+NCB_PRE_REGIST_CALLBACK(RegisterMinizipLicenses);
+
 NCB_POST_REGIST_CALLBACK(PostRegistCallback);
 NCB_PRE_UNREGIST_CALLBACK(PreUnregistCallback);
 NCB_POST_UNREGIST_CALLBACK(PostUnregistCallback);

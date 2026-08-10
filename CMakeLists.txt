@@ -8,6 +8,7 @@ krkrz_plugin(minizip
     SOURCES
         ioapi.cpp
         main.cpp
+        LicensesGen.cpp
         storage.cpp
     LIBRARIES
         MINIZIP::minizip-ng
