@@ -3,6 +3,10 @@
 
 #include "tp_stub.h"
 
+/* License API 非対応バージョンの tp_stub / 本体ヘッダと組み合わせた
+   ビルドでは登録をまるごとスキップして空関数になる (互換ガード)。 */
+#ifdef TVP_HAS_LICENSE_API
+
 /* minizip-ng (877 -> 462 bytes) */
 static const unsigned char lic_00[] = {
 	120,218,109,147,177,146,212,48,12,134,123,63,133,186,107,150,204,0,29,84,12,213,117,20,
@@ -31,3 +35,9 @@ void RegisterMinizipLicenses()
 {
 	TVPRegisterLicense(TJS_W("minizip-ng"), TJS_W("plugin:minizip"), lic_00, 462, 877);
 }
+
+#else /* !TVP_HAS_LICENSE_API */
+
+void RegisterMinizipLicenses() {}
+
+#endif /* TVP_HAS_LICENSE_API */
