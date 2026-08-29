@@ -1,5 +1,5 @@
 {
   "entries": [
-    { "name": "minizip-ng", "group": "plugin:minizip", "file": "texts/minizip-ng.txt" }
+    { "name": "minizip-ng", "group": "plugin:minizip", "license": "Zlib","file": "texts/minizip-ng.txt" }
   ]
 }
