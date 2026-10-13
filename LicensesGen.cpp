@@ -33,7 +33,11 @@ static const unsigned char lic_00[] = {
 
 void RegisterMinizipLicenses()
 {
-	TVPRegisterLicense(TJS_W("minizip-ng"), TJS_W("plugin:minizip"), lic_00, 462, 877);
+	try {
+		TVPRegisterLicense(TJS_W("minizip-ng"), TJS_W("plugin:minizip"), lic_00, 462, 877);
+	} catch (...) {
+		/* 本体が License API を持たない (古い本体) ときは登録しない */
+	}
 }
 
 #else /* !TVP_HAS_LICENSE_API */
